@@ -9,7 +9,7 @@ const app = express();
 const PORT = 5000;
 
 // Enable CORS for cross-origin requests (e.g., requests from your frontend)
-app.use(cors());
+app.use(cors({ origin: '*' }));
 
 // Parse JSON request bodies
 app.use(bodyParser.json());
