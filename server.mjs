@@ -6,11 +6,15 @@ import OpenAI from "openai";
 const openai = new OpenAI();
 
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 
 // Enable CORS for cross-origin requests (e.g., requests from your frontend)
-app.use(cors({ origin: '*' }));
-
+app.use(cors({
+    origin: '*',  // Replace with your actual frontend URL
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true  // Include this if you're sending cookies or other credentials
+}));
 // Parse JSON request bodies
 app.use(bodyParser.json());
 
