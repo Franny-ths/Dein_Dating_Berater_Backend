@@ -8,6 +8,7 @@ db.prepare(`
         original_profile TEXT NOT NULL,
         improved_profile TEXT NOT NULL,
         improvement_rating INTEGER,
+        improvement_message TEXT,
         date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
 `).run();

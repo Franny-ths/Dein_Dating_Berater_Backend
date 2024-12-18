@@ -1,5 +1,4 @@
 import express from 'express';
-import axios from 'axios';
 import cors from 'cors';
 import bodyParser from 'body-parser';
 import OpenAI from "openai";
@@ -9,113 +8,146 @@ const openai = new OpenAI();
 
 const app = express();
 const PORT = 5000;
+const debugLog = false;
+const runlocal = false;
+const ADMIN_API_KEY = "admin";
 
-// Enable CORS for cross-origin requests (e.g., requests from your frontend)
+
 app.use(cors());
-
-// Parse JSON request bodies
 app.use(bodyParser.json());
 
-// Fetch examples from the database
-const examples = db.prepare(`
-    SELECT original_profile, improved_profile 
+// Beispiele aus der Datenbank holen
+const goodExamples = db.prepare(`
+    SELECT original_profile, improved_profile, improvement_message
     FROM profiles 
+    WHERE improvement_rating = 1 
+    ORDER BY date DESC 
+    LIMIT 3
+`).all();
+
+const badExamples = db.prepare(`
+    SELECT original_profile, improved_profile, improvement_message
+    FROM profiles 
+    WHERE improvement_rating = 0 
     ORDER BY date DESC 
     LIMIT 3
 `).all();
 
 
-// OpenAI API setup
-
-// Endpoint to handle profile improvement requests
+// Endpunkt um das Profil zu verbessern
 app.post('/api/improve-profile', async (req, res) => {
-    const { profileData, rating } = req.body;
+    const { profileData } = req.body;
 
-    const fewShotExamples = examples.map((example) => ([
+    const goodFewShotExamples = goodExamples.map((example) => ([
         { role: "user", content: example.original_profile },
-        { role: "assistant", content: example.improved_profile }
-    ])).flat();  // Flatten to get a single-level array of messages
+        { role: "assistant", content: example.improved_profile },
+        { role: "user", content: "Diese Verbesserung wurde gut bewertet weil: " + example.improvement_message }
+    ])).flat();
+
+    const badFewShotExamples = badExamples.map((example) => ([
+        { role: "user", content: example.original_profile },
+        { role: "assistant", content: example.improved_profile },
+        { role: "user", content: "Diese Verbesserung wurde als schlecht bewertet weil: " + example.improvement_message }
+    ])).flat();
+
+    const allExamples = [...goodFewShotExamples, ...badFewShotExamples];
 
     try {
-        //console.log(...fewShotExamples)
+
+        const message = [
+            { role: "system", content: "Sie sind ein erfahrener Dating-Coach, der Nutzern hilft, ihre Dating-Profile zu verbessern. Verwenden Sie die bereitgestellten Beispiele als Leitfaden, um zu verstehen, was gut funktioniert und was nicht. Verbessern Sie das gegebene Profil, indem Sie es klarer und ansprechender formulieren, unangenehme oder irreführende Aussagen entfernen und sich an bewährte Verfahren halten." },
+            ...allExamples,
+            { role: "user", content: JSON.stringify(profileData) }
+        ];
         const completion = await openai.chat.completions.create({
             model: "gpt-4",
-            messages: [
-                { role: "system", content: "You are an expert dating coach helping users improve their dating profiles. You only get the certain aspects and you are trying to improve them by wording them differenty. Remove parts which seem rather weird or could be picked up wrong. You dont change anything in the syntax. Do not answer as a chat. Use the following examples as guidance." },
-                { role: "user", content: JSON.stringify(profileData) }
-                //...fewShotExamples,  // Add few-shot examples here
-            ],
+            messages: message,
         });
-
         const improvedProfile = completion.choices[0].message.content;
-        //console.log(improvedProfile);
+        if (debugLog) {
+            console.log(message);
+            console.log("Profil verbessert: " + improvedProfile);
+        }
+        console.log(`Erfolgreich Profil verbessert.`)
+
         res.json({ improvedProfile });
 
     } catch (error) {
-        console.error("Error in profile improvement:", error);
-        res.status(500).json({ error: "Profile improvement failed" });
+        console.error("Error beim Verbessern des Profils:", error);
+        res.status(500).json({ error: "Error beim Verbessern des Profils" });
     }
 });
 
+// Endpunkt um die Bertung mit den Profilen hopchzuladen
 app.post('/api/uploadResults', async (req, res) => {
-    let { originalProfile, improvedProfile, rating } = req.body;
- 
+    let { originalProfile, improvedProfile, rating, improvement_message } = req.body;
 
-    // Log types to ensure correct data types
-    console.log("Types - originalProfile:", typeof originalProfile, ", improvedProfile:", typeof improvedProfile, ", rating:", typeof rating);
-  
-    console.log("originalProfile: " + originalProfile);
-    console.log("improvedProfile: " + improvedProfile);
-    console.log("rating: " + rating);
+    if (debugLog) {
 
-
-    originalProfile = JSON.stringify(JSON.parse(originalProfile));
-    improvedProfile = JSON.stringify(JSON.parse(improvedProfile));
-
-    console.log("originalProfile: " + originalProfile);
-    console.log("improvedProfile: " + improvedProfile);
-
-
-    // Ensure rating is a number and profiles are strings
-    if (typeof rating !== 'number') {
-        rating = Number(rating);  // Convert to a number if possible
-    }
-    if (typeof originalProfile !== 'string' || typeof improvedProfile !== 'string') {
-        return res.status(400).json({ error: "Profile data must be strings." });
+        console.log("Types - originalProfile:", typeof originalProfile, ", improvedProfile:", typeof improvedProfile, ", rating:", typeof rating);
+        console.log("originalProfile:", originalProfile);
+        console.log("improvedProfile:", improvedProfile);
+        console.log("rating:", rating);
+        console.log("improvement_message:", improvement_message);
     }
 
     try {
-        const stmt = db.prepare("INSERT INTO profiles (original_profile, improved_profile, improvement_rating) VALUES (?, ?, ?)");
+        const stmt = db.prepare(
+            "INSERT INTO profiles (original_profile, improved_profile, improvement_rating, improvement_message) VALUES (?, ?, ?, ?)"
+        );
 
-        // Bind the parameters and run the statement
-        stmt.run([originalProfile, improvedProfile, rating], function (err) {
-            if (err) {
-                console.error("Database error:", err);
-                return res.status(500).json({ error: "Database save failed" });
-            }
-            res.json({ message: "Profile and rating saved successfully" });
-        });
-        stmt.finalize();
+        stmt.run(originalProfile, improvedProfile, rating, improvement_message)
+
+        console.log("Bewertung erfolgreich gespeichert");
+        res.json({ message: "Bewertung erfolgreich gespeichert" });
 
     } catch (error) {
-        console.error("Error saving rating:", error);
-        res.status(500).json({ error: "Rating save failed" });
+        console.error("Error beim speichern der Bewertung:", error);
+        res.status(500).json({ error: "Error beim speichern der Bewertung" });
     }
 });
 
 
-// Start the backend server
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-});
-
-
+// Endpunkt für Admin die Datenbank zu sehen
 app.get('/api/admin/profiles', (req, res) => {
     try {
         const profiles = db.prepare("SELECT * FROM profiles").all();
         res.json(profiles);
     } catch (error) {
-        console.error("Error retrieving profiles:", error);
-        res.status(500).json({ error: "Error retrieving profiles." });
+        console.error("Error beim Zugriff auf die Datenbank:", error);
+        res.status(500).json({ error: "Error beim Zugriff auf die Datenbank." });
+    }
+});
+
+
+// Endpunktfür Admin um die Datenbank zurückzusetzen
+app.post('/api/admin/reset-database', (req, res) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== ADMIN_API_KEY) {
+        return res.status(403).json({ error: "Nicht autorisierter Zugriff." });
+    }
+
+    try {
+        db.prepare(`DELETE FROM profiles`).run();
+
+        res.json({ message: "Datenbank wurde erfolgreich zurückgesetzt." });
+        console.log("Datenbank wurde erfolgreich zurückgesetzt.");
+    } catch (error) {
+        console.error("Error beim Zurücksetzten der Datenbank:", error);
+        res.status(500).json({ error: "Error beim Zurücksetzten der Datenbank." });
+    }
+});
+
+
+// Backend Server starten 
+app.listen(PORT, () => {
+    if (runlocal) {
+        console.log(`Server läuft auf http://localhost:${PORT}`);
+        console.log(`Profil Datenbank auf http://localhost:${PORT}/api/admin/profiles`)
+        console.log(`Datenbank zurücksetzen auf http://localhost:${PORT}/api/admin/reset-profiles`);
+    } else {
+        console.log(`Server läuft auf https://dein-dating-berater-backend.onrender.com/api/`);
+        console.log(`Profil Datenbank auf https://dein-dating-berater-backend.onrender.com/api/admin/profiles`);
+        console.log(`Datenbank zurücksetzen auf https://dein-dating-berater-backend.onrender.com/api/admin/reset-profiles`);
     }
 });
