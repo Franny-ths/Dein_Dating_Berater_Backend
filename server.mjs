@@ -52,10 +52,11 @@ app.post('/api/improve-profile', async (req, res) => {
 
     const allExamples = [...goodFewShotExamples, ...badFewShotExamples];
 
+    const systemPrompt = "Sie sind ein Experte für Dating-Coaching und helfen Nutzern, ihre Dating-Profile zu verbessern. Du bekommst nur bestimmte Aspekte und versuchst, sie zu verbessern, indem du sie anders formulierst. Entferne Teile, die seltsam erscheinen oder falsch aufgefasst werden könnten. Orientiere dich an den gestellten Beispielen was gut funktioniert und was nicht. Du änderst nichts an der Syntax. Antworten nicht als Chat.";
     try {
 
         const message = [
-            { role: "system", content: "Sie sind ein erfahrener Dating-Coach, der Nutzern hilft, ihre Dating-Profile zu verbessern. Verwenden Sie die bereitgestellten Beispiele als Leitfaden, um zu verstehen, was gut funktioniert und was nicht. Verbessern Sie das gegebene Profil, indem Sie es klarer und ansprechender formulieren, unangenehme oder irreführende Aussagen entfernen und sich an bewährte Verfahren halten." },
+            { role: "system", content: systemPrompt},
             ...allExamples,
             { role: "user", content: JSON.stringify(profileData) }
         ];
